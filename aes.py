@@ -126,10 +126,7 @@ def split_blocks(message, block_size=16, require_padding=True):
 
 class AES:
     """
-    Class for AES-128 encryption with CBC mode and PKCS#7.
-
-    This is a raw implementation of AES, without key stretching or IV
-    management. Unless you need that, please use `encrypt` and `decrypt`.
+    Class for AES-128 encryption with CBC mode and PKCS#7 padding.
     """
     rounds_by_key_size = {16: 10, 24: 12, 32: 14}
     def __init__(self, master_key, disabled_steps=None):

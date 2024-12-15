@@ -136,8 +136,6 @@ def inc_bytes(a):
 def pad(plaintext):
     """
     Pads the given plaintext with PKCS#7 padding to a multiple of 16 bytes.
-    Note that if the plaintext size is a multiple of 16,
-    a whole block will be added.
     """
     padding_len = 16 - (len(plaintext) % 16)
     padding = bytes([padding_len] * padding_len)
@@ -201,7 +199,7 @@ class AES:
             # Copy previous word.
             word = list(key_columns[-1])
 
-            # Perform schedule_core once every "row".
+            
             if len(key_columns) % iteration_size == 0:
                 # Circular shift.
                 word.append(word.pop(0))
@@ -223,10 +221,9 @@ class AES:
         return [key_columns[4 * i : 4 * (i + 1)] for i in range(len(key_columns) // 4)]
 
     def encrypt_block(self, plaintext):
-        print(plaintext)
         assert len(plaintext) == 16
         plain_state = bytes2matrix(plaintext)
-
+        print(self.disabled_steps)
         self.log_state("Input to Round 0", plain_state)
         if "AddRoundKey (Round 0)" not in self.disabled_steps:
             add_round_key(plain_state, self._key_matrices[0])

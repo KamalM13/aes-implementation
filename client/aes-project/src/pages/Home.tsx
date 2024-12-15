@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -16,6 +16,7 @@ import {
 } from "../components/ui/tabs";
 import AESDescription from "../components/Home/AESDescription";
 import axios from "axios";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 interface Step {
   state: string;
@@ -44,7 +45,41 @@ export default function Home() {
   const [decryptResult, setDecryptResult] = useState<DecryptionResponse | null>(
     null
   );
+  const [disabledSteps, setDisabledSteps] = useState<String[]>([]);
   const [error, setError] = useState("");
+  const rounds = 10;
+
+  const queryClient = useQueryClient();
+
+
+  
+  const toggleStep = (step: string) => {
+    setDisabledSteps((prev) =>
+      prev.includes(step)
+        ? prev.filter((s) => s !== step)
+        : [...prev, step]
+    );
+  };
+  const generateSteps = () => {
+    const steps = [];
+
+    steps.push("AddRoundKey (Round 0)");
+
+    for (let i = 1; i <= rounds; i++) {
+      steps.push(`S-Box (Round ${i})`);
+      steps.push(`Permutation (Round ${i})`);
+      steps.push(`Mult (Round ${i})`);
+      steps.push(`Subkey (Round ${i})`);
+    }
+
+    steps.push("S-Box (Final Round)");
+    steps.push("Permutation (Final Round)");
+    steps.push("Subkey (Final Round)");
+
+    return steps;
+  };
+
+  const steps = generateSteps();
 
   const handleEncrypt = async () => {
     setError("");
@@ -54,19 +89,29 @@ export default function Home() {
       setError("Key and plaintext are required.");
       return;
     }
-    
     try {
       const response = await axios.post("/encrypt", {
         key: encryptKey,
         plaintext,
+        disabled_steps: disabledSteps,
       });
       const data = await response.data;
       setEncryptResult(data);
+      return data;
     } catch (err: any) {
       console.log(err);
       setError(err.response.data.message || err.message);
     }
   };
+
+  const { data: encryptionResults, refetch } = useQuery({
+    queryKey: ["encrypt"],
+    queryFn: handleEncrypt,
+  })
+  useEffect(() => {
+    console.log(disabledSteps);
+    refetch()
+  }, [disabledSteps]);
 
   const handleDecrypt = async () => {
     setError("");
@@ -134,10 +179,12 @@ export default function Home() {
                     placeholder="Enter plaintext to encrypt"
                   />
                 </div>
-                <Button onClick={handleEncrypt}>Encrypt</Button>
+                <Button onClick={() => { 
+                  refetch()
+                }}>Encrypt</Button>
               </div>
 
-              {encryptResult && (
+              {encryptionResults && (
                 <div className="mt-6 p-6 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 rounded-2xl shadow-lg">
                   <h3 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-4 flex items-center gap-2">
                     🔒 <span>Encryption Result</span>
@@ -149,7 +196,7 @@ export default function Home() {
                         Ciphertext:
                       </span>
                       <span className="ml-2 break-words block text-indigo-600 dark:text-indigo-400 font-mono">
-                        {encryptResult.ciphertext}
+                        {encryptionResults.ciphertext}
                       </span>
                     </p>
                   </div>
@@ -158,17 +205,28 @@ export default function Home() {
                     Steps
                   </h4>
                   <ul className="space-y-3">
-                    {encryptResult.steps.map((step, index) => (
+                    {encryptionResults.steps.map((step: any, index: number) => (
                       <li
                         key={index}
-                        className="p-4 bg-white dark:bg-gray-700 rounded-lg shadow hover:shadow-lg transition-shadow duration-200 border-l-4 border-indigo-500 dark:border-indigo-400"
+                        className="p-4 px-20 bg-white dark:bg-gray-700 rounded-lg shadow hover:shadow-lg transition-shadow duration-200 border-l-4 border-indigo-500 dark:border-indigo-400 flex justify-between items-center"
                       >
-                        <span className="block font-semibold text-gray-900 dark:text-gray-100 mb-1">
-                          {step.step}
-                        </span>
-                        <span className="text-gray-600 dark:text-gray-300 font-mono">
-                          {step.state}
-                        </span>
+                        <div>
+                          <span className="block font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                            {step.step}
+                          </span>
+                          <span className="text-gray-600 dark:text-gray-300 font-mono">
+                            {step.state}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => toggleStep(steps[index - 1])}
+                          className={`px-3 py-1 rounded ${disabledSteps.includes(steps[index - 1])
+                            ? "bg-red-500 text-white hover:bg-red-600"
+                            : "bg-green-500 text-white hover:bg-green-600"
+                            }`}
+                        >
+                          {disabledSteps.includes(steps[index - 1]) ? "Enable" : "Disable"}
+                        </button>
                       </li>
                     ))}
                   </ul>

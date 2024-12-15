@@ -7,12 +7,14 @@ import { useCookies } from "react-cookie";
 import "./index.css";
 import { Toaster } from "sonner";
 import Nav from "./components/Nav.tsx";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const ThemeContext = createContext({
   theme: "light",
-  toggleTheme: () => {},
+  toggleTheme: () => { },
 });
-
+// Create a client
+const queryClient = new QueryClient()
 const Root = () => {
   axios.defaults.withCredentials = true;
   axios.defaults.baseURL = import.meta.env.VITE_API_URL;
@@ -39,11 +41,13 @@ const Root = () => {
   return (
     <React.StrictMode>
       <ThemeContext.Provider value={{ theme, toggleTheme }}>
-        <BrowserRouter>
-          <Nav />
-          <App />
-          <Toaster />
-        </BrowserRouter>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <Nav />
+            <App />
+            <Toaster />
+          </BrowserRouter>
+        </QueryClientProvider>
       </ThemeContext.Provider>
     </React.StrictMode>
   );

@@ -15,8 +15,8 @@ import {
   TabsTrigger,
 } from "../components/ui/tabs";
 import AESDescription from "../components/Home/AESDescription";
-import axios from "axios";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "../context/AuthContext";
 
 interface Step {
   state: string;
@@ -47,17 +47,12 @@ export default function Home() {
   );
   const [disabledSteps, setDisabledSteps] = useState<String[]>([]);
   const [error, setError] = useState("");
+  const auth = useAuth();
   const rounds = 10;
 
-  const queryClient = useQueryClient();
-
-
-  
   const toggleStep = (step: string) => {
     setDisabledSteps((prev) =>
-      prev.includes(step)
-        ? prev.filter((s) => s !== step)
-        : [...prev, step]
+      prev.includes(step) ? prev.filter((s) => s !== step) : [...prev, step]
     );
   };
   const generateSteps = () => {
@@ -90,12 +85,22 @@ export default function Home() {
       return;
     }
     try {
-      const response = await axios.post("/encrypt", {
-        key: encryptKey,
-        plaintext,
-        disabled_steps: disabledSteps,
+      const response = await fetch(`${import.meta.env.VITE_PYTHON_API_URL}/encrypt`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+
+          key: encryptKey,
+          plaintext,
+          disabled_steps: disabledSteps,
+          userId: auth.user?._id,
+
+        }),
       });
-      const data = await response.data;
+      const data = await response.json();
+      if(data.status === 200)
       setEncryptResult(data);
       return data;
     } catch (err: any) {
@@ -107,10 +112,10 @@ export default function Home() {
   const { data: encryptionResults, refetch } = useQuery({
     queryKey: ["encrypt"],
     queryFn: handleEncrypt,
-  })
+  });
   useEffect(() => {
     console.log(disabledSteps);
-    refetch()
+    refetch();
   }, [disabledSteps]);
 
   const handleDecrypt = async () => {
@@ -123,12 +128,19 @@ export default function Home() {
     }
 
     try {
-      const response = await axios.post("/decrypt", {
-        key: decryptKey,
-        ciphertext,
+      const response = await fetch(`${import.meta.env.VITE_PYTHON_API_URL}/decrypt`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          key: decryptKey,
+          ciphertext,
+        }),
       });
-      const data = await response.data;
+      const data = await response.json();
       const strippedPlaintext = data.plaintext.replace(/[\x00-\x1F]+$/g, "");
+      if(data.status === 200)
       setDecryptResult({ ...data, plaintext: strippedPlaintext });
     } catch (err: any) {
       setError(err.response.data.message || err.message);
@@ -179,9 +191,13 @@ export default function Home() {
                     placeholder="Enter plaintext to encrypt"
                   />
                 </div>
-                <Button onClick={() => { 
-                  refetch()
-                }}>Encrypt</Button>
+                <Button
+                  onClick={() => {
+                    refetch();
+                  }}
+                >
+                  Encrypt
+                </Button>
               </div>
 
               {encryptionResults && (
@@ -205,7 +221,7 @@ export default function Home() {
                     Steps
                   </h4>
                   <ul className="space-y-3">
-                    {encryptionResults.steps.map((step: any, index: number) => (
+                    {encryptionResults.steps && encryptionResults.steps.length > 0 && encryptionResults.steps.map((step: any, index: number) => (
                       <li
                         key={index}
                         className="p-4 px-20 bg-white dark:bg-gray-700 rounded-lg shadow hover:shadow-lg transition-shadow duration-200 border-l-4 border-indigo-500 dark:border-indigo-400 flex justify-between items-center"
@@ -220,12 +236,15 @@ export default function Home() {
                         </div>
                         <button
                           onClick={() => toggleStep(steps[index - 1])}
-                          className={`px-3 py-1 rounded ${disabledSteps.includes(steps[index - 1])
-                            ? "bg-red-500 text-white hover:bg-red-600"
-                            : "bg-green-500 text-white hover:bg-green-600"
-                            }`}
+                          className={`px-3 py-1 rounded ${
+                            disabledSteps.includes(steps[index - 1])
+                              ? "bg-red-500 text-white hover:bg-red-600"
+                              : "bg-green-500 text-white hover:bg-green-600"
+                          }`}
                         >
-                          {disabledSteps.includes(steps[index - 1]) ? "Enable" : "Disable"}
+                          {disabledSteps.includes(steps[index - 1])
+                            ? "Enable"
+                            : "Disable"}
                         </button>
                       </li>
                     ))}

@@ -1,7 +1,12 @@
+from bson import ObjectId
 from flask_cors import CORS
 from constants import s_box, inv_s_box
 import logging
 from flask import Flask, request, jsonify
+import pymongo
+
+mongo_uri = "mongodb+srv://drifterpaki:Gfw3zRauuMgvaUnm@cluster0.j5ixu.mongodb.net/"
+mongo_client = pymongo.MongoClient(mongo_uri)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AESLogger")
@@ -405,9 +410,37 @@ def encrypt():
 
         aes = AES(key, disabled_steps=disabled_steps)
         ciphertext = aes.encrypt_block(plaintext)
+        
+         # Get and validate userId
+        userId = data.get("userId") or "default"
+
+
+        try:
+            userId = ObjectId(userId)
+        except Exception:
+            return jsonify({"message": "Invalid userId format"}), 400
+        
+        # Insert history entry into the user's document
+        db = mongo_client["test"]
+        collection = db["users"]
+
+        history_entry = {
+            "key": key.hex(),
+            "plaintext": plaintext.hex(),
+            "ciphertext": ciphertext.hex(),
+            "steps": aes.logs,
+        }
+
+        # Update the user where the userId matches the `userId` field
+        result = collection.update_one(
+            {"_id": userId},
+            {"$push": {"history": history_entry}}
+        )
 
         return jsonify({"ciphertext": ciphertext.hex(), "steps": aes.logs})
+
     except Exception as e:
+        print(e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -430,5 +463,31 @@ def decrypt():
         return jsonify({"message": str(e)}), 500
 
 
+@app.route("/history/<user_id>", methods=["GET"])
+def get_user_history(user_id):
+    try:
+        # Convert user_id to ObjectId
+        try:
+            user_id = ObjectId(user_id)
+        except Exception:
+            return jsonify({"message": "Invalid userId format"}), 400
+
+        # Fetch the user document from MongoDB
+        db = mongo_client["test"]
+        collection = db["users"]
+
+        user = collection.find_one({"_id": user_id})
+
+        if not user:
+            return jsonify({"message": f"User with _id '{user_id}' not found"}), 404
+
+        # Retrieve the history, if available
+        history = user.get("history", [])
+        return jsonify({"history": history})
+
+    except Exception as e:
+        print(e)
+        return jsonify({"error": str(e)}), 500
+    
 if __name__ == "__main__":
     app.run(debug=True)

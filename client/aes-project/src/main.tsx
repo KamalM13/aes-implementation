@@ -5,19 +5,22 @@ import { BrowserRouter } from "react-router-dom";
 import axios from "axios";
 import { useCookies } from "react-cookie";
 import "./index.css";
-import { Toaster } from "sonner";
 import Nav from "./components/Nav.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AuthProvider } from "./context/AuthContext.tsx";
+import { GoogleOAuthProvider } from "@react-oauth/google";
+import PoweredByNovaTech from "./components/PoweredByNovaTech.tsx";
 
 const ThemeContext = createContext({
   theme: "light",
-  toggleTheme: () => { },
+  toggleTheme: () => {},
 });
 // Create a client
-const queryClient = new QueryClient()
+const queryClient = new QueryClient();
 const Root = () => {
   axios.defaults.withCredentials = true;
   axios.defaults.baseURL = import.meta.env.VITE_API_URL;
+  const [cookies] = useCookies(["access_token"]);
   const [themeCookie, setThemeCookie] = useCookies(["theme"]);
   const [theme, setTheme] = useState(themeCookie.theme || "light");
 
@@ -42,11 +45,13 @@ const Root = () => {
     <React.StrictMode>
       <ThemeContext.Provider value={{ theme, toggleTheme }}>
         <QueryClientProvider client={queryClient}>
-          <BrowserRouter>
-            <Nav />
-            <App />
-            <Toaster />
-          </BrowserRouter>
+          <AuthProvider authToken={cookies.access_token}>
+            <BrowserRouter>
+              <Nav />
+              <App />
+              <PoweredByNovaTech />
+            </BrowserRouter>
+          </AuthProvider>
         </QueryClientProvider>
       </ThemeContext.Provider>
     </React.StrictMode>
@@ -56,7 +61,9 @@ const Root = () => {
 export const useTheme = () => useContext(ThemeContext);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <div className="dark:bg-neutral-900 bg-white text-black dark:text-white">
-    <Root />
-  </div>
+  <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID}>
+    <div className="dark:bg-neutral-900 bg-white text-black dark:text-white">
+      <Root />
+    </div>
+  </GoogleOAuthProvider>
 );

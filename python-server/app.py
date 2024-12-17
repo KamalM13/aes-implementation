@@ -226,7 +226,7 @@ class AES:
         return [key_columns[4 * i : 4 * (i + 1)] for i in range(len(key_columns) // 4)]
 
     def encrypt_block(self, plaintext):
-        assert len(plaintext) == 16
+       
         plain_state = bytes2matrix(plaintext)
         print(self.disabled_steps)
         self.log_state("Input to Round 0", plain_state)
@@ -382,7 +382,7 @@ def encrypt():
         if len(key) % 16 != 0:
             key = pad(key)
         disabled_steps = data.get("disabled_steps", [])
-        print(disabled_steps)
+        
 
         if len(key) not in [16, 24, 32]:
             return jsonify({"message": f"Invalid key length: {len(key)} bytes"}), 400
@@ -407,11 +407,10 @@ def encrypt():
         if is_semiweak:
             return jsonify({"message": f"Provided key is semi-weak: {semiweak_reason}"}), 400
 
-
         aes = AES(key, disabled_steps=disabled_steps)
         ciphertext = aes.encrypt_block(plaintext)
-        
-         # Get and validate userId
+
+        # Get and validate userId
         userId = data.get("userId") or "default"
 
 

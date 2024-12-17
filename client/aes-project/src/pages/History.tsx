@@ -3,6 +3,7 @@ import { useAuth } from "../context/AuthContext";
 
 interface Step {
   step: string;
+ state: string; 
 }
 
 interface HistoryEntry {
@@ -28,6 +29,7 @@ const History = () => {
         }
         const data = await response.json();
         setHistory(data.history);
+        console.log(data.history);
       } catch (err) {
         setError((err as Error).message || "Error fetching history");
       } finally {
@@ -76,11 +78,11 @@ const History = () => {
                 </p>
                 <p className="text-xl font-medium text-gray-800 dark:text-gray-100 mb-2">
                   <span className="text-green-600">Plaintext:</span>{" "}
-                  <span className="text-gray-700 dark:text-gray-300">{entry.plaintext}</span>
+                  <span className="text-gray-700 dark:text-gray-300 break-words">{entry.plaintext}</span>
                 </p>
                 <p className="text-xl font-medium text-gray-800 dark:text-gray-100 mb-4">
                   <span className="text-red-600">Ciphertext:</span>{" "}
-                  <span className="text-gray-700 dark:text-gray-300">{entry.ciphertext}</span>
+                  <span className="text-gray-700 dark:text-gray-300 break-words">{entry.ciphertext}</span>
                 </p>
                 <details className="group cursor-pointer">
                   <summary className="font-medium text-indigo-600 dark:text-indigo-400 group-hover:text-indigo-800 mb-2 flex items-center">
@@ -92,7 +94,8 @@ const History = () => {
                   <ul className="list-disc pl-5 mt-2 space-y-2">
                     {entry.steps.map((stepObj, i) => (
                       <li key={i} className="text-gray-700 dark:text-gray-300">
-                        {stepObj.step}
+                        <p className="font-bold">{stepObj.step}</p>
+                        {stepObj.state}
                       </li>
                     ))}
                   </ul>

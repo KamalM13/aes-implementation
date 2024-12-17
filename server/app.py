@@ -317,6 +317,54 @@ def parse_input(data, key_field, text_field):
     text = to_bytes(data[text_field])
     return key, text
 
+def is_weak_key(key: bytes) -> tuple[bool, str | None]:
+    """Check if the given AES key is weak and return the reason."""
+    if len(set(key)) <= len(key) // 4:  # Too many repeated bytes
+        return True, "Key has too many repeated bytes."
+    if all(byte == key[0] for byte in key):  # All bytes are the same
+        return True, "Key has identical bytes."
+    if key == b'\x00' * len(key):  # All zero key
+        return True, "Key is an all-zero key."
+    if key == b'\xFF' * len(key):  # All one key
+        return True, "Key is an all-one key."
+    return False, None
+
+
+def is_semiweak_key(key: bytes) -> tuple[bool, str | None]:
+    """Check if the given AES key exhibits semi-weak characteristics and return the reason."""
+    # Validate key length for AES
+    if len(key) not in {16, 24, 32}:
+        raise ValueError("Invalid AES key length")
+
+    # Check for mirrored keys (first half == reversed second half)
+    half_length = len(key) // 2
+    if len(key) % 2 == 0 and key[:half_length] == key[half_length:][::-1]:
+        return True, "Key is a mirrored key (first half equals reversed second half)."
+
+    # Check for cyclic patterns
+    for i in range(1, len(key) // 2 + 1):
+        if len(key) % i == 0 and key == key[:i] * (len(key) // i):
+            return True, "Key exhibits a cyclic pattern."
+
+    # Check for low Hamming distance from weak keys
+    weak_keys = [
+        b'\x00' * len(key),  # All-zero key
+        b'\xFF' * len(key),  # All-one key
+        b'\xAA' * len(key),  # Alternating 10101010
+        b'\x55' * len(key),  # Alternating 01010101
+    ]
+    for weak_key in weak_keys:
+        if hamming_distance(key, weak_key) < len(key) // 4:  # Adjustable threshold
+            return True, f"Key has a low Hamming distance to weak key: {weak_key.hex()}."
+
+    return False, None
+
+
+
+def hamming_distance(key1: bytes, key2: bytes) -> int:
+    """Calculate the Hamming distance between two byte strings."""
+    return sum(bin(byte1 ^ byte2).count('1') for byte1, byte2 in zip(key1, key2))
+
 
 @app.route("/encrypt", methods=["POST"])
 def encrypt():
@@ -343,6 +391,17 @@ def encrypt():
                 ),
                 400,
             )
+        
+        # Check if the key is weak
+        is_weak, weak_reason = is_weak_key(key)
+        if is_weak:
+            return jsonify({"message": f"Provided key is weak: {weak_reason}"}), 400
+
+        # Check if the key is semi-weak
+        is_semiweak, semiweak_reason = is_semiweak_key(key)
+        if is_semiweak:
+            return jsonify({"message": f"Provided key is semi-weak: {semiweak_reason}"}), 400
+
 
         aes = AES(key, disabled_steps=disabled_steps)
         ciphertext = aes.encrypt_block(plaintext)

@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "./context/AuthContext.tsx";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import PoweredByNovaTech from "./components/PoweredByNovaTech.tsx";
+import { Toaster } from "sonner";
 
 const ThemeContext = createContext({
   theme: "light",
@@ -50,6 +51,7 @@ const Root = () => {
               <Nav />
               <App />
               <PoweredByNovaTech />
+              <Toaster />
             </BrowserRouter>
           </AuthProvider>
         </QueryClientProvider>

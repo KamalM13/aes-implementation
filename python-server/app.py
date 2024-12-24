@@ -4,9 +4,17 @@ from constants import s_box, inv_s_box
 import logging
 from flask import Flask, request, jsonify
 import pymongo
+import requests
+import os
+from supabase import create_client
 
 mongo_uri = "mongodb+srv://drifterpaki:Gfw3zRauuMgvaUnm@cluster0.j5ixu.mongodb.net/"
 mongo_client = pymongo.MongoClient(mongo_uri)
+
+SUPABASE_URL = "https://wyxxstrkekcifuoqaigd.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5eHhzdHJrZWtjaWZ1b3FhaWdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzUwNTQ0MzIsImV4cCI6MjA1MDYzMDQzMn0.L7KCHXKfViJyUwbcAS7PWOaiyV3LItxfY-Moi4OHkKQ"
+supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+bucket_name = "security"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AESLogger")
@@ -204,7 +212,6 @@ class AES:
             # Copy previous word.
             word = list(key_columns[-1])
 
-            
             if len(key_columns) % iteration_size == 0:
                 # Circular shift.
                 word.append(word.pop(0))
@@ -226,7 +233,7 @@ class AES:
         return [key_columns[4 * i : 4 * (i + 1)] for i in range(len(key_columns) // 4)]
 
     def encrypt_block(self, plaintext):
-       
+
         plain_state = bytes2matrix(plaintext)
         print(self.disabled_steps)
         self.log_state("Input to Round 0", plain_state)
@@ -322,15 +329,16 @@ def parse_input(data, key_field, text_field):
     text = to_bytes(data[text_field])
     return key, text
 
+
 def is_weak_key(key: bytes) -> tuple[bool, str | None]:
     """Check if the given AES key is weak and return the reason."""
     if len(set(key)) <= len(key) // 4:  # Too many repeated bytes
         return True, "Key has too many repeated bytes."
     if all(byte == key[0] for byte in key):  # All bytes are the same
         return True, "Key has identical bytes."
-    if key == b'\x00' * len(key):  # All zero key
+    if key == b"\x00" * len(key):  # All zero key
         return True, "Key is an all-zero key."
-    if key == b'\xFF' * len(key):  # All one key
+    if key == b"\xFF" * len(key):  # All one key
         return True, "Key is an all-one key."
     return False, None
 
@@ -353,22 +361,68 @@ def is_semiweak_key(key: bytes) -> tuple[bool, str | None]:
 
     # Check for low Hamming distance from weak keys
     weak_keys = [
-        b'\x00' * len(key),  # All-zero key
-        b'\xFF' * len(key),  # All-one key
-        b'\xAA' * len(key),  # Alternating 10101010
-        b'\x55' * len(key),  # Alternating 01010101
+        b"\x00" * len(key),  # All-zero key
+        b"\xFF" * len(key),  # All-one key
+        b"\xAA" * len(key),  # Alternating 10101010
+        b"\x55" * len(key),  # Alternating 01010101
     ]
     for weak_key in weak_keys:
         if hamming_distance(key, weak_key) < len(key) // 4:  # Adjustable threshold
-            return True, f"Key has a low Hamming distance to weak key: {weak_key.hex()}."
+            return (
+                True,
+                f"Key has a low Hamming distance to weak key: {weak_key.hex()}.",
+            )
 
     return False, None
 
 
+def encrypt_and_upload_image(image_url, aes):
+    
+    response = requests.get(image_url)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch image from URL.")
+
+    image_data = response.content
+    padded_data = pad(image_data)
+    ciphertext = b""
+    for i in range(0, len(padded_data), 16):
+        block = padded_data[i : i + 16]
+        ciphertext += aes.encrypt_block(block)
+
+    unique_id = str(ObjectId())
+    object_name = f"encrypted_image_{unique_id}.bin"
+    upload_response = supabase.storage.from_(bucket_name).upload(object_name, ciphertext)
+    download_url = supabase.storage.from_(bucket_name).get_public_url(object_name)
+    return download_url
+
 
 def hamming_distance(key1: bytes, key2: bytes) -> int:
     """Calculate the Hamming distance between two byte strings."""
-    return sum(bin(byte1 ^ byte2).count('1') for byte1, byte2 in zip(key1, key2))
+    return sum(bin(byte1 ^ byte2).count("1") for byte1, byte2 in zip(key1, key2))
+
+
+def decrypt_and_upload(download_url, aes, bucket_name, decrypted_filename="decrypted_image.jpg"):
+    response = requests.get(download_url)
+    if response.status_code != 200:
+        raise Exception("Failed to download the encrypted file.")
+    encrypted_data = response.content
+
+    decrypted_data = b""
+    for i in range(0, len(encrypted_data), 16):
+        block = encrypted_data[i : i + 16]
+        decrypted_data += aes.decrypt_block(block)
+
+    padding_len = decrypted_data[-1]
+    decrypted_data = decrypted_data[:-padding_len]
+
+    unique_id = str(ObjectId())
+    decrypted_filename = f"decrypted_image_{unique_id}.jpg"
+    upload_response = supabase.storage.from_(bucket_name).upload(decrypted_filename, decrypted_data)
+
+    public_url = supabase.storage.from_(bucket_name).get_public_url(decrypted_filename, {'download': True})
+    return public_url
+
+
 
 
 @app.route("/encrypt", methods=["POST"])
@@ -376,13 +430,12 @@ def encrypt():
     try:
         data = request.get_json()
         key, plaintext = parse_input(data, "key", "plaintext")
-
+        image_url = data.get("image_url")
         if len(plaintext) % 16 != 0:
             plaintext = pad(plaintext)
         if len(key) % 16 != 0:
             key = pad(key)
         disabled_steps = data.get("disabled_steps", [])
-        
 
         if len(key) not in [16, 24, 32]:
             return jsonify({"message": f"Invalid key length: {len(key)} bytes"}), 400
@@ -396,7 +449,7 @@ def encrypt():
                 ),
                 400,
             )
-        
+
         # Check if the key is weak
         is_weak, weak_reason = is_weak_key(key)
         if is_weak:
@@ -405,36 +458,66 @@ def encrypt():
         # Check if the key is semi-weak
         is_semiweak, semiweak_reason = is_semiweak_key(key)
         if is_semiweak:
-            return jsonify({"message": f"Provided key is semi-weak: {semiweak_reason}"}), 400
+            return (
+                jsonify({"message": f"Provided key is semi-weak: {semiweak_reason}"}),
+                400,
+            )
 
         aes = AES(key, disabled_steps=disabled_steps)
-        ciphertext = aes.encrypt_block(plaintext)
+        ciphertext = None
+        # Process plaintext encryption
+        if plaintext != b"":
+            if len(plaintext) % 16 != 0:
+                plaintext = pad(plaintext.encode())
+            ciphertext = aes.encrypt_block(plaintext)
+
+        # Process image encryption
+        elif image_url:
+            response = requests.get(image_url)
+            if response.status_code != 200:
+                return jsonify({"message": "Failed to fetch image from URL"}), 400
+            download_url = encrypt_and_upload_image(image_url, aes)
+            return jsonify(
+                {"message": "Encryption successful", "ciphertext": download_url}
+            )
+
+        else:
+            return (
+                jsonify(
+                    {"message": "No valid input provided (plaintext or image_url)"}
+                ),
+                400,
+            )
 
         # Get and validate userId
         userId = data.get("userId") or "default"
 
-
-        try:
-            userId = ObjectId(userId)
-        except Exception:
-            return jsonify({"message": "Invalid userId format"}), 400
-        
         # Insert history entry into the user's document
         db = mongo_client["test"]
         collection = db["users"]
 
-        history_entry = {
-            "key": key.hex(),
-            "plaintext": plaintext.hex(),
-            "ciphertext": ciphertext.hex(),
-            "steps": aes.logs,
-        }
+        if image_url:
+            history_entry = {
+                "key": key.hex(),
+                "image_url": image_url,
+                "ciphertext": ciphertext.hex(),
+                "steps": aes.logs,
+            }
+        else:
+            history_entry = {
+                "key": key.hex(),
+                "plaintext": plaintext.hex(),
+                "ciphertext": ciphertext.hex(),
+                "steps": aes.logs,
+            }
 
         # Update the user where the userId matches the `userId` field
-        result = collection.update_one(
-            {"_id": userId},
-            {"$push": {"history": history_entry}}
-        )
+        if(userId):
+            result = collection.update_one(
+                {"_id": userId}, {"$push": {"history": history_entry}}
+            )
+        else:
+            result = collection.insert_one({"history": [history_entry]})
 
         return jsonify({"ciphertext": ciphertext.hex(), "steps": aes.logs})
 
@@ -448,13 +531,29 @@ def decrypt():
     try:
         data = request.get_json()
         key, ciphertext = parse_input(data, "key", "ciphertext")
+        image_url = data.get("image_url")
 
         if len(key) % 16 != 0:
             key = pad(key)
 
         aes = AES(key)
-        plaintext = aes.decrypt_block(ciphertext)
+        if ciphertext != b"":
+            plaintext = aes.decrypt_block(ciphertext)
+        elif image_url:
+            try:
+                # Decrypt the file and get the public URL of the decrypted image
+                unique_id = str(ObjectId())
+                decrypted_url = decrypt_and_upload(
+                    image_url, aes, bucket_name, f"decrypted_image_{unique_id}.jpg"
+                )
+            except Exception as e:
+                return jsonify({"message": str(e)}), 500
 
+            return jsonify(
+                {"message": "Decryption successful", "plaintext": decrypted_url}
+            )
+
+        plaintext = unpad(plaintext)
         return jsonify(
             {"plaintext": plaintext.decode(errors="replace"), "steps": aes.logs}
         )
@@ -487,6 +586,7 @@ def get_user_history(user_id):
     except Exception as e:
         print(e)
         return jsonify({"error": str(e)}), 500
-    
+
+
 if __name__ == "__main__":
     app.run(debug=True)

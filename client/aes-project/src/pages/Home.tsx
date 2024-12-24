@@ -15,8 +15,12 @@ import {
   TabsTrigger,
 } from "../components/ui/tabs";
 import AESDescription from "../components/Home/AESDescription";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext";
+import axios from "axios";
+import { supabase } from "../utils/supabase";
+import { v4 as uuidv4 } from "uuid";
+import { toast } from "sonner";
 
 interface Step {
   state: string;
@@ -46,6 +50,15 @@ export default function Home() {
     null
   );
   const [disabledSteps, setDisabledSteps] = useState<String[]>([]);
+  const [image, setImage] = useState<File | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setImage(e.target.files[0]);
+    }
+  };
+  const [imageURL, setImageURL] = useState<String>();
+  const [decryptUrl, setDecryptUrl] = useState("");
   const [error, setError] = useState("");
   const auth = useAuth();
   const rounds = 10;
@@ -74,37 +87,37 @@ export default function Home() {
     return steps;
   };
 
+  const queryClient = useQueryClient();
+
   const steps = generateSteps();
 
   const handleEncrypt = async () => {
     setError("");
     setEncryptResult(null);
 
-    if (!encryptKey || !plaintext) {
+    if (!encryptKey || (!plaintext && !image)) {
       setError("Key and plaintext are required.");
       return;
     }
     try {
-      const response = await fetch(`${import.meta.env.VITE_PYTHON_API_URL}/encrypt`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-
+      const response = await axios.post(
+        `${import.meta.env.VITE_PYTHON_API_URL}/encrypt`,
+        {
           key: encryptKey,
           plaintext,
+          image_url: imageURL,
           disabled_steps: disabledSteps,
           userId: auth.user?._id,
-
-        }),
-      });
-      const data = await response.json();
-      if(data.status === 200)
-      setEncryptResult(data);
+        }
+      );
+      const data = await response.data;
+      if (data.status === 200) setEncryptResult(data);
+      if (data.status === 400) {
+        setError(data.message);
+      }
       return data;
     } catch (err: any) {
-      console.log(err);
+      queryClient.invalidateQueries({ queryKey: ["encrypt"] });
       setError(err.response.data.message || err.message);
     }
   };
@@ -112,6 +125,7 @@ export default function Home() {
   const { data: encryptionResults, refetch } = useQuery({
     queryKey: ["encrypt"],
     queryFn: handleEncrypt,
+    enabled: false,
   });
   useEffect(() => {
     console.log(disabledSteps);
@@ -122,29 +136,57 @@ export default function Home() {
     setError("");
     setDecryptResult(null);
 
-    if (!decryptKey || !ciphertext) {
+    if (!decryptKey || (!ciphertext && !decryptUrl)) {
       setError("Key and ciphertext are required.");
       return;
     }
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_PYTHON_API_URL}/decrypt`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          key: decryptKey,
-          ciphertext,
-        }),
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_PYTHON_API_URL}/decrypt`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            key: decryptKey,
+            ciphertext,
+            image_url: decryptUrl,
+          }),
+        }
+      );
       const data = await response.json();
-      const strippedPlaintext = data.plaintext.replace(/[\x00-\x1F]+$/g, "");
-      if(data.status === 200)
-      setDecryptResult({ ...data, plaintext: strippedPlaintext });
+      setDecryptResult(data);
+      if (data.status === 400) {
+        console.log(data.message);
+        setError(data.message);
+      }
     } catch (err: any) {
+      console.log(err);
       setError(err.response.data.message || err.message);
     }
+  };
+
+  const handleImageUpload = async (file: any) => {
+    //random identifier for image name
+    const randomId = uuidv4();
+    const { error } = await supabase.storage
+      .from("security")
+      .upload(`${file.name + randomId}`, file);
+
+    if (error) {
+      setError(error.message);
+      return null;
+    }
+
+    const { publicUrl } = supabase.storage
+      .from("security")
+      .getPublicUrl(`${file.name + randomId}`).data;
+
+    toast.success("Image uploaded successfully");
+    console.log(publicUrl);
+    setImageURL(publicUrl);
   };
 
   return (
@@ -182,7 +224,7 @@ export default function Home() {
                     placeholder="Enter 32-byte hex key"
                   />
                 </div>
-                <div>
+                <div className="flex items-center gap-4">
                   <Label htmlFor="plaintext">Plaintext</Label>
                   <Input
                     id="plaintext"
@@ -190,6 +232,20 @@ export default function Home() {
                     onChange={(e) => setPlaintext(e.target.value)}
                     placeholder="Enter plaintext to encrypt"
                   />
+                  <Input
+                    id="image"
+                    onChange={handleFileChange}
+                    placeholder="Enter image URL"
+                    type="file"
+                  />
+                  <Button
+                    onClick={() => {
+                      handleImageUpload(image);
+                    }}
+                    disabled={!image}
+                  >
+                    Upload Image
+                  </Button>
                 </div>
                 <Button
                   onClick={() => {
@@ -221,33 +277,37 @@ export default function Home() {
                     Steps
                   </h4>
                   <ul className="space-y-3">
-                    {encryptionResults.steps && encryptionResults.steps.length > 0 && encryptionResults.steps.map((step: any, index: number) => (
-                      <li
-                        key={index}
-                        className="p-4 px-20 bg-white dark:bg-gray-700 rounded-lg shadow hover:shadow-lg transition-shadow duration-200 border-l-4 border-indigo-500 dark:border-indigo-400 flex justify-between items-center"
-                      >
-                        <div>
-                          <span className="block font-semibold text-gray-900 dark:text-gray-100 mb-1">
-                            {step.step}
-                          </span>
-                          <span className="text-gray-600 dark:text-gray-300 font-mono">
-                            {step.state}
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => toggleStep(steps[index - 1])}
-                          className={`px-3 py-1 rounded ${
-                            disabledSteps.includes(steps[index - 1])
-                              ? "bg-red-500 text-white hover:bg-red-600"
-                              : "bg-green-500 text-white hover:bg-green-600"
-                          }`}
-                        >
-                          {disabledSteps.includes(steps[index - 1])
-                            ? "Enable"
-                            : "Disable"}
-                        </button>
-                      </li>
-                    ))}
+                    {encryptionResults.steps &&
+                      encryptionResults.steps.length > 0 &&
+                      encryptionResults.steps.map(
+                        (step: any, index: number) => (
+                          <li
+                            key={index}
+                            className="p-4 px-20 bg-white dark:bg-gray-700 rounded-lg shadow hover:shadow-lg transition-shadow duration-200 border-l-4 border-indigo-500 dark:border-indigo-400 flex justify-between items-center"
+                          >
+                            <div>
+                              <span className="block font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                                {step.step}
+                              </span>
+                              <span className="text-gray-600 dark:text-gray-300 font-mono">
+                                {step.state}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => toggleStep(steps[index - 1])}
+                              className={`px-3 py-1 rounded ${
+                                disabledSteps.includes(steps[index - 1])
+                                  ? "bg-red-500 text-white hover:bg-red-600"
+                                  : "bg-green-500 text-white hover:bg-green-600"
+                              }`}
+                            >
+                              {disabledSteps.includes(steps[index - 1])
+                                ? "Enable"
+                                : "Disable"}
+                            </button>
+                          </li>
+                        )
+                      )}
                   </ul>
                 </div>
               )}
@@ -281,6 +341,13 @@ export default function Home() {
                     onChange={(e) => setCiphertext(e.target.value)}
                     placeholder="Enter ciphertext to decrypt"
                   />
+                  <Label htmlFor="decryptUrl">Image URL</Label>
+                  <Input
+                    id="decryptUrl"
+                    value={decryptUrl}
+                    onChange={(e) => setDecryptUrl(e.target.value)}
+                    placeholder="Enter image URL"
+                  />
                 </div>
                 <Button onClick={handleDecrypt}>Decrypt</Button>
               </div>
@@ -306,7 +373,7 @@ export default function Home() {
                     Steps
                   </h4>
                   <ul className="space-y-3">
-                    {decryptResult.steps.map((step, index) => (
+                    {decryptResult.steps?.map((step, index) => (
                       <li
                         key={index}
                         className="p-4 bg-white dark:bg-gray-700 rounded-lg shadow hover:shadow-lg transition-shadow duration-200 border-l-4 border-green-500 dark:border-green-400"
